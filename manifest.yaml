@@ -12,7 +12,7 @@ workflows:
   # ==========================================================================
 
   # Core workflows (using unified posts table)
-  - path: "workflows/substack/content_sync_v3"
+  - path: "workflows/substack/content_sync_v4"
     enabled: true
     description: "Sync posts from publications to database"
 
