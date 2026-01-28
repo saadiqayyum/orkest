@@ -14,7 +14,7 @@ workflows:
   # Core workflows (using unified posts table)
   - path: "workflows/substack/content_sync_v3"
     enabled: true
-    description: "Sync posts from publications to database saad"
+    description: "Sync posts from publications to database"
 
   - path: "workflows/substack/queue_sources_v3"
     enabled: true
