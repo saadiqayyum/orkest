@@ -1,0 +1,260 @@
+name: factory
+display_name: The Factory
+version: "5.4"
+description: |
+  **AI Content Production** - Transforms queued topics into publication-ready drafts.
+
+  Flow:
+  1. **Get Item** - Fetch and lock next pending item from queue
+  2. **Load Context** - Get source content if source-derived
+  3. **Draft Article** - LLM writes the article content
+  4. **Inject Images** - LLM inserts `<image:N>` and `<paywall>` placeholders + generates prompts
+  5. **Generate Images** (optional) - Generate actual images from prompts
+  6. **Save Draft** - Store article + image prompts for review
+
+  Output package:
+  - Article with placeholders (`<image:1>`, `<image:2>`, `<paywall>`) already inserted
+  - Compiled image prompts keyed by placeholder (e.g., `image:1`, `image:2`)
+  - Generated images (if enabled)
+
+trigger:
+  schema:
+    type: object
+    required:
+      - target_handle
+    properties:
+      target_handle:
+        type: string
+        title: "Target Publication Handle"
+        description: "Handle of your Substack publication (e.g., 'mypub' from mypub.substack.com)"
+      queue_id:
+        type: string
+        title: "Queue Item ID (Optional)"
+        description: "Re-run on a specific queue item instead of picking next pending"
+      length_mode:
+        type: string
+        enum: ["brief", "standard", "long", "custom"]
+        default: "standard"
+        title: "Article Length"
+        description: "Brief (~700 words), Standard (~1250 words), Long (~2500 words), or Custom"
+      custom_word_count:
+        type: integer
+        title: "Custom Word Count"
+        description: "Only used when Article Length is set to 'custom'"
+      article_model:
+        type: string
+        title: "Article Model"
+        description: "AI model for article drafting (uses deployment config if not specified)"
+        enum:
+          - "Llama 3.2 (Local)"
+          - "Llama 3.1 (Local)"
+          - "Gemini 3 Pro"
+          - "Gemini 3 Flash"
+          - "Gemini 2.5 Pro"
+          - "Claude Opus 4.5"
+          - "Claude Sonnet 4"
+          - "Claude 3.5 Haiku"
+          - "GPT-4o"
+          - "GPT-4o Mini"
+      min_images:
+        type: integer
+        default: 0
+        title: "Min Inline Images"
+        description: "Minimum number of inline images (hero image is separate)"
+      max_images:
+        type: integer
+        default: 2
+        title: "Max Inline Images"
+        description: "Maximum number of inline images (hero image is separate)"
+      generate_images:
+        type: boolean
+        default: false
+        title: "Generate Images"
+        description: "Generate actual images from prompts (otherwise just returns prompts for manual generation)"
+      image_model:
+        type: string
+        title: "Image Model"
+        description: "AI model for image generation (only used if Generate Images is enabled)"
+        enum:
+          - "Nano Banana Pro"
+          - "DALL-E 3"
+          - "Stable Diffusion (Local)"
+          - "Placeholder (Dev)"
+  ui_hints:
+    layout: vertical
+    submit_label: "Start Production"
+
+# Config declarations - these are bound to vault configs in deployment
+# Access via ctx.get_config("key") in node code
+configs:
+  article_prompt:
+    description: "Writing style and constraints for article drafting"
+    required: true
+    type: PROMPT_TEMPLATE
+  hero_image_style:
+    description: "Base style prompt for hero image (combined with LLM description)"
+    required: true
+    type: PROMPT_TEMPLATE
+  inline_image_style:
+    description: "Base style prompt for inline images (combined with LLM description)"
+    required: true
+    type: PROMPT_TEMPLATE
+
+nodes:
+  # =========================================================================
+  # SETUP
+  # =========================================================================
+
+  - id: reset_stale_items
+    type: function
+    description: Reset items stuck in 'drafting' for >30 min (crash recovery)
+    config:
+      path: "nodes.db_ops.reset_stale_drafting_items"
+      params:
+        target_handle: "{{target_handle}}"
+        stale_minutes: 30
+    routes:
+      success: get_pending_item
+      error: get_pending_item
+
+  # =========================================================================
+  # GET AND LOCK QUEUE ITEM
+  # =========================================================================
+
+  - id: get_pending_item
+    type: function
+    description: Fetch queue item (specific ID or next pending) and lock for drafting
+    config:
+      path: "nodes.db_ops.get_pending_queue_items"
+      params:
+        target_handle: "{{target_handle}}"
+        queue_id: "{{queue_id}}"
+        limit: 1
+    routes:
+      success: load_context
+      no_pending_items: __END__
+      error: __ERROR__
+
+  # =========================================================================
+  # LOAD CONTEXT (source content if source-derived)
+  # =========================================================================
+
+  - id: load_context
+    type: function
+    description: Load source article content (if source-derived) or return empty
+    config:
+      path: "nodes.db_ops.load_drafting_context"
+      params:
+        source_ref_id: "{{items[0].source_ref_id}}"
+        length_mode: "{{length_mode}}"
+        custom_word_count: "{{custom_word_count}}"
+    routes:
+      success: draft_article
+      error: reset_and_fail
+
+  # =========================================================================
+  # DRAFT ARTICLE
+  # =========================================================================
+
+  - id: draft_article
+    type: function
+    description: Generate article draft using LLM
+    config:
+      path: "nodes.llm.draft_article"
+      params:
+        title: "{{items[0].title}}"
+        source_content: "{{source_content}}"
+        idea_summary: "{{items[0].idea_summary}}"
+        idea_inspiration: "{{items[0].idea_inspiration}}"
+        post_type: "{{items[0].post_type}}"
+        constraints:
+          word_count: "{{target_word_count}}"
+        llm_config:
+          model: "{{article_model}}"
+    routes:
+      success: inject_images
+      error: reset_and_fail
+
+  # =========================================================================
+  # INJECT IMAGES (unified: placement + prompts in one step)
+  # =========================================================================
+
+  - id: inject_images
+    type: function
+    description: LLM inserts <image:N> and <paywall> placeholders + generates image prompts
+    config:
+      path: "nodes.llm.inject_images"
+      params:
+        draft_content: "{{draft_content}}"
+        post_type: "{{items[0].post_type}}"
+        min_images: "{{min_images}}"
+        max_images: "{{max_images}}"
+        llm_config:
+          model: "{{article_model}}"
+    routes:
+      success: generate_images_node
+      error: reset_and_fail
+
+  # =========================================================================
+  # GENERATE IMAGES (skipped if generate_images=false)
+  # =========================================================================
+
+  - id: generate_images_node
+    type: function
+    description: Generate actual images from prompts (skipped if generate_images=false)
+    config:
+      path: "nodes.llm.generate_images_from_prompts"
+      params:
+        image_prompts: "{{image_prompts}}"
+        image_model: "{{image_model}}"
+        generate_images: "{{generate_images}}"
+    routes:
+      success: save_draft
+      skipped: save_draft
+      error: reset_and_fail
+
+  # =========================================================================
+  # SAVE DRAFT
+  # =========================================================================
+
+  - id: save_draft
+    type: function
+    description: Save draft and image prompts to database
+    config:
+      path: "nodes.db_ops.update_queue_item_draft"
+      params:
+        queue_id: "{{items[0].id}}"
+        draft_content: "{{draft_content}}"
+        draft_metadata:
+          target_word_count: "{{target_word_count}}"
+          length_mode: "{{length_mode}}"
+          article_model: "{{article_model}}"
+          article_prompt: "{{article_prompt}}"
+          image_model: "{{image_model}}"
+          summary: "{{items[0].idea_summary}}"
+          inspiration: "{{items[0].idea_inspiration}}"
+          post_type: "{{items[0].post_type}}"
+          has_paywall: "{{has_paywall}}"
+          image_prompts: "{{image_prompts}}"
+          generated_images: "{{generated_images}}"
+    routes:
+      success: __END__
+      error: reset_and_fail
+
+  # =========================================================================
+  # ERROR RECOVERY
+  # =========================================================================
+
+  - id: reset_and_fail
+    type: function
+    description: Reset queue item back to pending on error (allows retry)
+    config:
+      path: "nodes.db_ops.reset_drafting_status"
+      params:
+        queue_id: "{{items[0].id}}"
+    routes:
+      success: __ERROR__
+      not_found: __ERROR__
+      no_queue_id: __ERROR__
+      not_drafting: __ERROR__
+      error: __ERROR__

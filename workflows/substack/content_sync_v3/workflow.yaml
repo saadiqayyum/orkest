@@ -1,0 +1,140 @@
+name: content_sync_v3
+display_name: Content Sync
+version: "3.2"
+description: |
+  Scrape Substack publications and store posts in the database.
+
+  1. Fetches post listings from specified publications
+  2. Identifies new posts not yet stored
+  3. Scrapes full content (with auth for paid subscriptions)
+  4. Generates embeddings for semantic search
+
+  Run regularly to keep your content database fresh.
+
+  **Secrets required:**
+  - SUBSTACK_SID: Substack session cookie (substack.sid value)
+  - SUBSTACK_LLI: Substack likely-logged-in cookie (substack.lli value)
+  - PAID_SUBSCRIPTION_HANDLES: Comma-separated list of handles you have paid subscriptions to
+
+trigger:
+  schema:
+    type: object
+    required:
+      - source_handles
+    properties:
+      source_handles:
+        type: array
+        items:
+          type: string
+        title: "Publication Handles"
+        description: "Substack handles to scrape (e.g., designgurus, postsyntax)"
+  ui_hints:
+    layout: vertical
+    submit_label: "Start Sync"
+
+# Secrets from project vault (bound in deployment)
+secrets:
+  - SUBSTACK_SID
+  - SUBSTACK_LLI
+  - PAID_SUBSCRIPTION_HANDLES
+
+nodes:
+  # Fetch post listings from publications
+  # Cookies come from ctx.secrets.SUBSTACK_COOKIES (project vault)
+  - id: fetch_post_listings
+    type: function
+    description: Fetch post listings from source publications
+    config:
+      path: "nodes.scraper.fetch_post_listings"
+      params:
+        source_handles: "{{source_handles}}"
+    routes:
+      success: identify_new_posts
+      error: __ERROR__
+
+  # Identify new posts
+  - id: identify_new_posts
+    type: function
+    description: Find posts not yet in database
+    config:
+      path: "nodes.db_ops.identify_new_post_urls"
+      params:
+        posts: "{{posts}}"
+    routes:
+      success: fetch_content
+      error: __ERROR__
+
+  # Fetch full content for new posts
+  # Cookies and paid handles come from ctx.secrets (project vault)
+  - id: fetch_content
+    type: function
+    description: Download full article content for new posts
+    config:
+      path: "nodes.scraper.fetch_post_content_batch"
+      params:
+        posts: "{{new_posts}}"
+    routes:
+      success: store_posts
+      whitelist_failed: __ERROR__
+      all_failed: store_posts_metadata
+      error: __ERROR__
+
+  - id: store_posts
+    type: function
+    description: Save posts to database
+    config:
+      path: "nodes.db_ops.upsert_posts"
+      params:
+        posts: "{{posts}}"
+        discovery_source: "content_sync"
+    routes:
+      success: generate_embeddings
+      error: __ERROR__
+
+  - id: store_posts_metadata
+    type: function
+    description: Save post metadata (content fetch failed)
+    config:
+      path: "nodes.db_ops.upsert_posts"
+      params:
+        posts: "{{new_posts}}"
+        discovery_source: "content_sync"
+    routes:
+      success: generate_embeddings
+      error: __ERROR__
+
+  # Generate embeddings for semantic search
+  - id: generate_embeddings
+    type: function
+    description: Find posts needing embeddings
+    config:
+      path: "nodes.db_ops.get_posts_needing_embeddings"
+      params:
+        publication_handles: "{{source_handles}}"
+        limit: 500
+    routes:
+      success: batch_embed_posts
+      error: __ERROR__
+
+  - id: batch_embed_posts
+    type: function
+    description: Create vector embeddings for posts
+    config:
+      path: "nodes.embeddings.batch_embed_posts"
+      params:
+        posts: "{{posts}}"
+    routes:
+      success: store_embeddings
+      all_failed: __END__  # No posts to embed is fine
+      error: __ERROR__
+
+  - id: store_embeddings
+    type: function
+    description: Save embeddings to database
+    config:
+      path: "nodes.db_ops.update_post_embeddings"
+      params:
+        items: "{{items}}"
+    routes:
+      success: __END__
+      error: __ERROR__

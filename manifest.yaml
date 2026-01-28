@@ -1,0 +1,39 @@
+# manifest.yaml - declares all workflows in the dg-team repository
+name: "dg-team"
+version: "2.0"
+author: "Digital Trover"
+description: |
+  AI Substack Mirroring Engine - automated content pipeline for
+  monitoring competitor publications and generating high-quality content.
+
+workflows:
+  # ==========================================================================
+  # SUBSTACK - AI Content Mirroring Pipeline
+  # ==========================================================================
+
+  # Core workflows (using unified posts table)
+  - path: "workflows/substack/content_sync_v3"
+    enabled: true
+    description: "Sync posts from publications to database"
+
+  - path: "workflows/substack/queue_sources_v3"
+    enabled: true
+    description: "Queue high-performing articles from posts table"
+
+  - path: "workflows/substack/generate_ideas"
+    enabled: true
+    description: "Generate original topic ideas using AI"
+
+  - path: "workflows/substack/factory"
+    enabled: true
+    description: "Generate content drafts for queued items"
+
+  # Meta-workflows (orchestration)
+
+  # ==========================================================================
+  # SUBSTACK RESEARCH - Discovery and Analysis Tools
+  # ==========================================================================
+
+  - path: "workflows/substack-research/publication_discovery"
+    enabled: true
+    description: "Discover top Substack publications in a niche by scraping leaderboards"

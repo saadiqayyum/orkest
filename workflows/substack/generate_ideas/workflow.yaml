@@ -1,0 +1,208 @@
+name: generate_ideas
+display_name: Generate Topic Ideas
+version: "3.0"
+description: |
+  **Data-Driven Idea Generator** - Generate topic ideas based on what's performing well.
+
+  Uses a proven strategy:
+
+  1. **Resolve Sources** - Gets source publications from input or KV store
+  2. **Fetch Top Posts** - Gets top N posts from each source (last 90 days, by likes)
+  3. **Filter Worked** - Removes posts you've already worked on (in queue or published)
+  4. **Fetch Your Voice** - Gets your published posts for style/voice context
+  5. **Generate Ideas** - LLM creates ideas that tap into proven demand + fit your voice
+  6. **Dedup Ideas** - LLM checks for semantic duplicates against existing content
+  7. **Queue Survivors** - Adds unique ideas to production queue
+
+  Ideas include both **paid** (premium deep-dives) and **free** (growth) content suggestions.
+
+  **Source publications can be provided in two ways:**
+  - Direct: Pass a list of publication handles
+  - KV lookup: Pass a discovery KV key (from publication_discovery workflow)
+
+trigger:
+  schema:
+    type: object
+    required:
+      - target_handle
+    properties:
+      target_handle:
+        type: string
+        title: "Target Publication"
+        description: "Your Substack handle (e.g., 'mysubstack')"
+      publications:
+        type: array
+        items:
+          type: string
+        title: "Source Publications"
+        description: "List of source publication handles (e.g., ['designgurus', 'postsyntax'])"
+      discovery_kv_key:
+        type: string
+        title: "Discovery KV Key"
+        description: "KV key containing source publications (expects {handles: [...]} format from publication_discovery). Takes priority over 'publications'. Fails if key doesn't exist."
+      idea_count:
+        type: integer
+        default: 10
+        title: "Ideas to Generate"
+        description: "Number of topic ideas to generate"
+      posts_per_source:
+        type: integer
+        default: 5
+        title: "Posts per Source"
+        description: "Top posts to fetch from each source publication"
+      max_age_days:
+        type: integer
+        default: 90
+        title: "Max Age (days)"
+        description: "Only consider source posts from this timeframe"
+      generate_model:
+        type: string
+        title: "Idea Generation Model"
+        description: "AI model for generating ideas (creative task)"
+        default: "Gemini 3 Pro"
+        enum:
+          - "Gemini 3 Pro"
+          - "Gemini 3 Flash"
+          - "Claude Sonnet 4"
+          - "Claude Opus 4"
+          - "GPT-4o"
+          - "GPT-4o Mini"
+      dedup_model:
+        type: string
+        title: "Dedup Model"
+        description: "AI model for deduplication (classification task)"
+        default: "Gemini 2.5 Flash Lite"
+        enum:
+          - "Gemini 2.5 Flash Lite"
+          - "Gemini 2.5 Flash"
+          - "Gemini 3 Flash"
+          - "Claude 3.5 Haiku"
+          - "GPT-4o Mini"
+  ui_hints:
+    layout: vertical
+    submit_label: "Generate Ideas"
+
+nodes:
+  # =========================================================================
+  # STEP 1: RESOLVE SOURCE PUBLICATIONS
+  # =========================================================================
+
+  - id: resolve_sources
+    type: function
+    description: Get source publications from input or KV store
+    config:
+      path: "nodes.db_ops.resolve_source_publications"
+      params:
+        publications: "{{publications}}"
+        discovery_kv_key: "{{discovery_kv_key}}"
+    routes:
+      success: fetch_top_source_posts
+      no_sources: __ERROR__
+      error: __ERROR__
+
+  # =========================================================================
+  # STEP 2: FETCH TOP SOURCE POSTS
+  # =========================================================================
+
+  - id: fetch_top_source_posts
+    type: function
+    description: Get top-performing posts from source publications (last 90 days, excluding already-worked posts)
+    config:
+      path: "nodes.db_ops.fetch_top_source_posts"
+      params:
+        publications: "{{publications}}"
+        posts_per_source: "{{posts_per_source}}"
+        max_age_days: "{{max_age_days}}"
+        target_handle: "{{target_handle}}"  # Used to filter out posts already used for idea generation
+    routes:
+      success: filter_worked_posts
+      error: __ERROR__
+
+  # =========================================================================
+  # STEP 3: FILTER OUT ALREADY-WORKED POSTS
+  # =========================================================================
+
+  - id: filter_worked_posts
+    type: function
+    description: Remove posts already in queue or published
+    config:
+      path: "nodes.db_ops.filter_worked_source_posts"
+      params:
+        target_handle: "{{target_handle}}"
+        posts: "{{source_posts}}"
+    routes:
+      success: fetch_my_posts
+      error: __ERROR__
+
+  # =========================================================================
+  # STEP 4: FETCH MY POSTS FOR VOICE CONTEXT
+  # =========================================================================
+
+  - id: fetch_my_posts
+    type: function
+    description: Get my published posts for voice/style context
+    config:
+      path: "nodes.db_ops.fetch_my_published_posts"
+      params:
+        target_handle: "{{target_handle}}"
+        limit: 10
+        content_preview_length: 500
+    routes:
+      success: generate_ideas_llm
+      error: __ERROR__
+
+  # =========================================================================
+  # STEP 5: LLM GENERATES IDEAS
+  # =========================================================================
+
+  - id: generate_ideas_llm
+    type: function
+    description: LLM generates ideas based on top posts + your voice
+    config:
+      path: "nodes.llm.generate_ideas_from_sources"
+      params:
+        source_posts: "{{source_posts}}"
+        my_posts: "{{my_posts}}"
+        idea_count: "{{idea_count}}"
+        llm_config:
+          model: "{{generate_model}}"
+          temperature: 0
+    routes:
+      success: dedup_ideas_llm
+      no_source_posts: __END__ # No source posts available to generate ideas from
+      error: __ERROR__
+
+  # =========================================================================
+  # STEP 6: LLM DEDUP IDEAS
+  # =========================================================================
+
+  - id: dedup_ideas_llm
+    type: function
+    description: LLM checks for semantic duplicates against existing content
+    config:
+      path: "nodes.llm.dedup_ideas_llm"
+      params:
+        target_handle: "{{target_handle}}"
+        ideas: "{{ideas}}"
+        llm_config:
+          model: "{{dedup_model}}"
+          temperature: 0
+    routes:
+      success: queue_ideas
+      error: __ERROR__
+
+  # =========================================================================
+  # STEP 7: QUEUE SURVIVING IDEAS
+  # =========================================================================
+
+  - id: queue_ideas
+    type: function
+    description: Add unique ideas to production queue
+    config:
+      path: "nodes.db_ops.queue_gap_ideas"
+      params:
+        target_handle: "{{target_handle}}"
+        ideas: "{{surviving_ideas}}"
+    routes:
+      success: __END__
+      error: __ERROR__

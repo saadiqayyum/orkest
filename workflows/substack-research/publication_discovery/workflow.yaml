@@ -1,0 +1,195 @@
+name: publication_discovery
+display_name: Publication Discovery
+version: "4.0"
+description: |
+  **Substack Publication Finder** - Discover top publications matching your keywords.
+
+  Uses Borda ranking to find the best publications:
+
+  1. **Scrape Leaderboards** - Fetches top 75 paid + top 75 trending from a category
+  2. **Fetch & Store Posts** - Gets recent + top posts, stores to global posts table (crash-safe)
+  3. **LLM Scoring** - LLM scores each post 0-100 for relevance to keywords
+  4. **Rank Publications** - Borda ranking using leaderboard + relevance signals
+  5. **Generate Report** - Creates ranked list with copy-paste handles
+
+  Posts are stored as they're fetched - if workflow crashes, fetched posts are preserved.
+
+trigger:
+  schema:
+    type: object
+    required:
+      - category
+      - keywords
+    properties:
+      category:
+        type: string
+        title: "Substack Category"
+        description: "Category to search (e.g., 'technology', 'finance', 'culture')"
+        enum:
+          - technology
+          - finance
+          - business
+          - culture
+          - politics
+          - sports
+          - food
+          - faith
+          - music
+          - art
+          - climate
+          - health
+      keywords:
+        type: string
+        title: "Keywords"
+        description: "Keywords to match (e.g., 'System Design; Distributed Systems; Scalability')"
+      top_n:
+        type: integer
+        default: 10
+        title: "Top N Results"
+        description: "Number of top publications to return (ranked by Borda score)"
+      posts_per_pub:
+        type: integer
+        default: 6
+        title: "Posts per Publication"
+        description: "Max posts to fetch per publication (3 recent + 3 top)"
+      model:
+        type: string
+        title: "LLM Model"
+        description: "Model to use for scoring"
+        default: "Gemini 2.5 Flash Lite"
+        enum:
+          - Gemini 2.5 Flash Lite
+          - Gemini 2.5 Flash
+          - Gemini 2.0 Flash
+          - GPT-4o Mini
+          - GPT-4o
+          - Claude Sonnet 4
+          - Qwen 2.5 (Local)
+          - Qwen 2.5 Coder 32B (Local)
+      kv_key:
+        type: string
+        title: "KV Store Key"
+        description: "Key name to store results in KV store (e.g., 'ai_sources', 'finance_sources')"
+        default: "discovery_sources"
+      scoring_prompt:
+        type: string
+        format: textarea
+        title: "Scoring Criteria"
+        description: "Instructions for LLM on how to score relevance (advanced)"
+        default: |
+          Role: You are a content analyst specialized in thematic classification. Your task is to evaluate Social Media Posts against a specific Publication Topic defined by the keywords provided.
+
+          Scoring Guidelines:
+          - 0-20 (Irrelevant): The post belongs to a different domain entirely, even if it shares vocabulary. (e.g., "Architecture" in construction vs. "Architecture" in software).
+          - 30-50 (Tangential): The post mentions a keyword but focuses on a different primary subject.
+          - 60-80 (Relevant): The post is clearly about the domain defined by the keywords and provides direct value to that audience.
+          - 90-100 (Highly Relevant): The post is a "perfect fit." The core problem discussed in the post is exactly what the keywords describe.
+
+          Strict Filtering Rules:
+          - Context over Keywords: Do not increase the score just because keywords appear. A post about "Career Advice for System Designers" should score lower (40-50) than a post about "Implementing Paxos for Distributed Systems" (90+), as the latter is a technical match for the field.
+          - Field Isolation: If the keywords are for "Backend Engineering," a post about "Frontend Performance" using similar scaling terms must be scored below 30.
+  ui_hints:
+    layout: vertical
+    submit_label: "Discover Publications"
+
+nodes:
+  # =========================================================================
+  # STEP 1: SCRAPE LEADERBOARDS
+  # =========================================================================
+
+  - id: scrape_leaderboards
+    type: function
+    description: Fetch top 100 paid + trending publications from Substack leaderboard
+    config:
+      path: "nodes.discovery.scrape_leaderboards"
+      params:
+        category: "{{category}}"
+    routes:
+      success: fetch_publication_posts
+      error: __ERROR__
+
+  # =========================================================================
+  # STEP 2: FETCH POSTS (title + subtitle only)
+  # =========================================================================
+
+  - id: fetch_publication_posts
+    type: function
+    description: Fetch posts and store to global posts table (crash-safe)
+    config:
+      path: "nodes.discovery.fetch_publication_posts"
+      params:
+        publications: "{{publications}}"
+        recent_count: 3
+        top_count: 3
+    routes:
+      success: score_posts_llm
+      error: __ERROR__
+
+  # =========================================================================
+  # STEP 3: LLM SCORING
+  # =========================================================================
+
+  - id: score_posts_llm
+    type: function
+    description: LLM scores each post 0-100 for relevance to keywords
+    config:
+      path: "nodes.discovery.score_posts_llm"
+      params:
+        publications: "{{publications}}"
+        keywords: "{{keywords}}"
+        scoring_prompt: "{{scoring_prompt}}"
+        llm_config:
+          model: "{{model}}"
+    routes:
+      success: rank_publications_llm
+      no_posts: __END__
+      error: __ERROR__
+
+  # =========================================================================
+  # STEP 4: RANK PUBLICATIONS (Borda scoring with LLM scores)
+  # =========================================================================
+
+  - id: rank_publications_llm
+    type: function
+    description: Rank all publications using Borda scoring (4 signals including LLM scores)
+    config:
+      path: "nodes.discovery.rank_publications_llm"
+      params:
+        scored_publications: "{{scored_publications}}"
+    routes:
+      success: generate_report
+      error: __ERROR__
+
+  # =========================================================================
+  # STEP 5: GENERATE REPORT
+  # =========================================================================
+
+  - id: generate_report
+    type: function
+    description: Generate report with top N publications
+    config:
+      path: "nodes.discovery.generate_report"
+      params:
+        ranked_publications: "{{ranked_publications}}"
+        top_n: "{{top_n}}"
+        category: "{{category}}"
+        keywords: "{{keywords}}"
+        kv_key: "{{kv_key}}"
+    routes:
+      success: save_report
+      error: __ERROR__
+
+  - id: save_report
+    type: function
+    description: Save discovery report to Orkest
+    config:
+      path: "orkest.builtins.reports.save_report"
+      params:
+        title: "{{report_title}}"
+        markdown_content: "{{report_markdown}}"
+        tags: "{{report_tags}}"
+        report_type: "publication_discovery"
+        json_data: "{{report_json}}"
+    routes:
+      success: __END__
+      error: __END__

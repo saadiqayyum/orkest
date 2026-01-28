@@ -1,0 +1,70 @@
+name: queue_sources_v3
+display_name: Queue Source Articles v3 (Unified Posts)
+version: "3.0"
+description: |
+  **Source Article Selector v3** - Queues articles from unified `posts` table.
+
+  Picks a mix of recent and top-performing articles from your source publications:
+
+  1. **Filter** - Only articles with full content, meeting min likes and max age thresholds
+  2. **Exclude** - Skip articles already in queue or already published
+  3. **Pick** - Alternate between recent (last 7 days) and top performers for variety
+  4. **Queue** - Add selected articles to production queue
+
+  **Key difference from v2**: Queries the unified `posts` table instead of `source_items`.
+  Takes `source_handles` as input directly (not derived from target config).
+
+  Run after `content_sync_v3` to queue articles for drafting.
+
+trigger:
+  schema:
+    type: object
+    required:
+      - source_handles
+      - target_handle
+    properties:
+      source_handles:
+        type: array
+        items:
+          type: string
+        title: "Source Publication Handles"
+        description: "Publication handles to draw articles from (e.g., designgurus, postsyntax)"
+      target_handle:
+        type: string
+        title: "Target Publication"
+        description: "Your Substack handle (for the production queue)"
+      count:
+        type: integer
+        default: 10
+        title: "Articles to Queue"
+        description: "Number of articles to add to queue"
+      min_likes:
+        type: integer
+        default: 10
+        title: "Minimum Likes"
+        description: "Only consider articles with at least this many likes"
+      max_age_days:
+        type: integer
+        default: 90
+        title: "Max Age (days)"
+        description: "Only consider articles published within this timeframe"
+  ui_hints:
+    layout: vertical
+    submit_label: "Queue Articles"
+
+nodes:
+  - id: queue_sources
+    type: function
+    description: Find eligible posts and add to production queue
+    config:
+      path: "nodes.db_ops.queue_sources_from_posts"
+      params:
+        source_handles: "{{source_handles}}"
+        target_handle: "{{target_handle}}"
+        count: "{{count}}"
+        min_likes: "{{min_likes}}"
+        max_age_days: "{{max_age_days}}"
+    routes:
+      success: __END__
+      no_items: __END__
+      error: __ERROR__
