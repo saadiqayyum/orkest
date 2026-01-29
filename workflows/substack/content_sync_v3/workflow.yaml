@@ -2,7 +2,7 @@ name: content_sync_v3
 display_name: Content Sync
 version: "3.2"
 description: |
-  Scrape Substack publications and store posts in the database.isaad
+  Scrape Substack publications and store posts in the database.
 
   1. Fetches post listings from specified publications
   2. Identifies new posts not yet stored
