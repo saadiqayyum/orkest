@@ -537,6 +537,7 @@ async def get_posts_needing_embeddings(
     ctx.report_input({
         "publication_handles": publication_handles,
         "limit": limit,
+        "db": os.environ.get("DATABASE_URL", "not_set"),
     })
 
     async with get_db_session() as db:
@@ -564,6 +565,7 @@ async def get_posts_needing_embeddings(
             for row in result.fetchall()
         ]
 
+        logger.info("posts_needing_embeddings_found", count=len(posts))
         logger.info("posts_needing_embeddings_found", count=len(posts))
 
         ctx.report_output({
