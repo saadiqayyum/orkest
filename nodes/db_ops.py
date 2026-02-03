@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Dict, Any
 from uuid import UUID
 import structlog
+import os
 
 from sqlalchemy import select, func, and_, or_, text
 from sqlalchemy.dialects.postgresql import insert
