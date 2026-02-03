@@ -37,6 +37,7 @@ secrets:
   - SUBSTACK_SID
   - SUBSTACK_LLI
   - PAID_SUBSCRIPTION_HANDLES
+  - DATABASE_URL
 
 nodes:
   # Fetch post listings from publications
