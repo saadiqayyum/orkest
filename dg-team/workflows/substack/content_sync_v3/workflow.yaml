@@ -2,7 +2,7 @@ name: content_sync_v3
 display_name: Content Sync
 version: "3.3"
 description: |
-  Scrape Substack publications and store posts in the database. saadi
+  Scrape Substack publications and store posts in the database. isss
 
   1. Fetches post listings from specified publications
   2. Identifies new posts not yet stored
@@ -64,7 +64,7 @@ nodes:
         posts: "{{posts}}"
     routes:
       success: fetch_and_store_content
-      no_new_items: generate_embeddings  # Skip to embeddings if nothing new
+      no_new_items: generate_embeddings # Skip to embeddings if nothing new
       error: __ERROR__
 
   # Fetch full content and store each post immediately
@@ -81,7 +81,7 @@ nodes:
         delay_seconds: 30
     routes:
       success: generate_embeddings
-      all_failed: generate_embeddings  # Still try embeddings for any existing posts
+      all_failed: generate_embeddings # Still try embeddings for any existing posts
       error: __ERROR__
 
   # Generate embeddings for semantic search
