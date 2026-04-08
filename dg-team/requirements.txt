@@ -1,3 +1,9 @@
 # Shared dependencies for workflows
 pydantic>=2.0
 httpx
+structlog
+sqlalchemy[asyncio]
+pgvector
+asyncpg
+beautifulsoup4
+feedparser
