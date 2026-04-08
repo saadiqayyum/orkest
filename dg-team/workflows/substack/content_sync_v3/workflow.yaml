@@ -15,6 +15,7 @@ description: |
   - SUBSTACK_SID: Substack session cookie (substack.sid value)
   - SUBSTACK_LLI: Substack likely-logged-in cookie (substack.lli value)
   - PAID_SUBSCRIPTION_HANDLES: Comma-separated list of handles you have paid subscriptions to
+  - DATABASE_URL: Db url for storing posts and embeddings
 
 trigger:
   schema:
@@ -37,6 +38,7 @@ secrets:
   - SUBSTACK_SID
   - SUBSTACK_LLI
   - PAID_SUBSCRIPTION_HANDLES
+  - DATABASE_URL
 
 nodes:
   # Fetch post listings from publications
