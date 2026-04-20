@@ -1,0 +1,63 @@
+# ── Python ────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Packaging / build
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+pip-wheel-metadata/
+MANIFEST
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Testing / coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+
+# Type checkers
+.mypy_cache/
+.pyre/
+.pytype/
+.ruff_cache/
+
+# ── LangGraph CLI ─────────────────────────────────────────────────────────
+# Local dev-server scratch state (compiled graphs, checkpoints, etc.)
+.langgraph_api/
+.langgraph/
+
+# ── Agent runtime ─────────────────────────────────────────────────────────
+# Disk cache for external API calls (SerpAPI, PageSpeed, scrapes)
+cache_store/
+# CLI-mode output (seo_report.md, report_data.json)
+output/
+
+# ── Secrets ──────────────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ── IDE / editor ──────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ── Claude Code workspace ─────────────────────────────────────────────────
+.claude/
